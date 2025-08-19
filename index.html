@@ -880,6 +880,10 @@ input::placeholder, textarea::placeholder {
         <!-- Statistics Modal -->
         <div id="statsModal" class="modal">
             <div class="modal-content">
+                <!-- Inside the statsModal content, after the stats-grid -->
+<button onclick="showAgainCards()" style="margin-top: 20px;">
+    <i class="fas fa-redo"></i> View Again-Rated Cards
+</button>
                 <span class="close" onclick="closeStatsModal()">&times;</span>
                 <h2>Study Statistics</h2>
                 <div class="stats-grid">
@@ -964,6 +968,16 @@ A2: Jupiter</pre>
             </div>
         </div>
     </div>
+    <!-- Again Cards Modal -->
+<div id="againCardsModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeAgainCardsModal()">&times;</span>
+        <h2>Cards Rated as "Again"</h2>
+        <div id="againCardsList" style="max-height: 400px; overflow-y: auto;">
+            <!-- Cards will be populated here -->
+        </div>
+    </div>
+</div>
 
     <script>
 // Enhanced Flashcard App with Anki-like Features
@@ -1054,6 +1068,7 @@ class SpacedRepetition {
 
 // Initialize the app
 function init() {
+    migrateCards();
     loadSettings();
     updatePresetList();
     updateStudyStats();
@@ -1073,6 +1088,14 @@ function init() {
 }
 
 function setupEventListeners() {
+    // Add this to your setupEventListeners function
+document.addEventListener('keydown', function(e) {
+    if (e.key === ' ' && e.target === document.body) {
+        e.preventDefault();
+    }
+});       
+    // Keyboard navigation
+document.addEventListener("keydown", handleKeyNavigation);
     // Flip card on click
     document.addEventListener("click", (e) => {
         if (e.target.closest(".main")) {
@@ -1104,6 +1127,38 @@ function setupEventListeners() {
 }
 
 function handleKeyNavigation(e) {
+        if (e.key === " " || (e.key >= "1" && e.key <= "4")) {
+        e.preventDefault();
+    }
+    
+    if (e.key === " ") {
+        // Space to flip card
+        const mainCard = document.querySelector(".main");
+        if (mainCard) mainCard.classList.toggle("flipped");
+        e.preventDefault(); // Add this line to prevent scrolling
+        return false; // Add this line to prevent scrolling
+    } else if (e.key >= "1" && e.key <= "4") {
+        // Number keys 1-4 for rating
+        const rating = parseInt(e.key);
+        if (!document.querySelector(".main").classList.contains("flipped")) {
+            // If card isn't flipped, flip it first
+            document.querySelector(".main").classList.add("flipped");
+            // Wait for flip animation before rating
+            setTimeout(() => rateCard(rating), 300);
+        } else {
+            // If already flipped, rate immediately
+            rateCard(rating);
+        }
+        e.preventDefault(); // Add this line to prevent scrolling
+        return false; // Add this line to prevent scrolling
+    } else if (e.key === "ArrowRight") {
+        nextCard();
+    } else if (e.key === "ArrowLeft") {
+        prevCard();
+    }
+    if (e.key === " " || (e.key >= "1" && e.key <= "4")) {
+        e.preventDefault();
+    }
     if (e.key === "ArrowRight") {
         nextCard();
     } else if (e.key === "ArrowLeft") {
@@ -1165,7 +1220,34 @@ function filterDueCards() {
     flashcards = dueCards;
     currentCardIndex = 0;
 }
-
+function handleKeyNavigation(e) {
+    // Prevent default behavior for specific keys
+    if (e.key === " " || (e.key >= "1" && e.key <= "4")) {
+        e.preventDefault();
+    }
+    
+    if (e.key === " ") {
+        // Space to flip card
+        const mainCard = document.querySelector(".main");
+        if (mainCard) mainCard.classList.toggle("flipped");
+    } else if (e.key >= "1" && e.key <= "4") {
+        // Number keys 1-4 for rating
+        const rating = parseInt(e.key);
+        if (!document.querySelector(".main").classList.contains("flipped")) {
+            // If card isn't flipped, flip it first
+            document.querySelector(".main").classList.add("flipped");
+            // Wait for flip animation before rating
+            setTimeout(() => rateCard(rating), 300);
+        } else {
+            // If already flipped, rate immediately
+            rateCard(rating);
+        }
+    } else if (e.key === "ArrowRight") {
+        nextCard();
+    } else if (e.key === "ArrowLeft") {
+        prevCard();
+    }
+}
 // Card Type Management
 function setCardType(type) {
     currentCardType = type;
@@ -1178,10 +1260,25 @@ function setCardType(type) {
 }
 
 // Enhanced Card Rating with Spaced Repetition
+// Enhanced Card Rating with Spaced Repetition
 function rateCard(rating) {
+    if (this.ratingInProgress) return;
+    this.ratingInProgress = true;
     if (flashcards.length === 0) return;
     
     const card = flashcards[currentCardIndex];
+    
+    // Add rating history if it doesn't exist
+    if (!card.ratingHistory) {
+        card.ratingHistory = [];
+    }
+    
+    // Record this rating
+    card.ratingHistory.push({
+        rating: rating,
+        date: new Date().toISOString()
+    });
+    
     SpacedRepetition.calculateNextReview(card, rating);
     
     // Update daily stats
@@ -1219,6 +1316,10 @@ function rateCard(rating) {
         nextCard();
         updateStudyStats();
     }, 300);
+    
+    setTimeout(() => {
+        this.ratingInProgress = false;
+    }, 500);
 }
 
 function showSessionComplete() {
@@ -1358,6 +1459,7 @@ function updateDailyStats(rating = null) {
 }
 
 // Enhanced Flashcard Creation
+// Enhanced Flashcard Creation
 function addFlashcard() {
     const tags = document.getElementById("tags").value.trim().split(',').map(t => t.trim()).filter(t => t);
     const difficulty = document.getElementById("difficulty").value;
@@ -1373,7 +1475,11 @@ function addFlashcard() {
                 question, answer, tags, difficulty,
                 cardType: 'new',
                 confidence: 0,
-                createdAt: new Date().toISOString()
+                easeFactor: 2.5, // Add default ease factor
+                repetitions: 0,  // Add default repetitions
+                interval: 0,     // Add default interval
+                createdAt: new Date().toISOString(),
+                ratingHistory: [] // Initialize rating history
             });
         }
     } else if (currentCardType === 'reverse') {
@@ -1386,13 +1492,21 @@ function addFlashcard() {
                     question, answer, tags, difficulty,
                     cardType: 'new',
                     confidence: 0,
-                    createdAt: new Date().toISOString()
+                    easeFactor: 2.5,
+                    repetitions: 0,
+                    interval: 0,
+                    createdAt: new Date().toISOString(),
+                    ratingHistory: []
                 },
                 {
                     question: answer, answer: question, tags, difficulty,
                     cardType: 'new',
                     confidence: 0,
-                    createdAt: new Date().toISOString()
+                    easeFactor: 2.5,
+                    repetitions: 0,
+                    interval: 0,
+                    createdAt: new Date().toISOString(),
+                    ratingHistory: []
                 }
             );
         }
@@ -1452,9 +1566,13 @@ function processClozeText(text, tags, difficulty) {
             question, answer, tags, difficulty,
             cardType: 'new',
             confidence: 0,
+            easeFactor: 2.5,
+            repetitions: 0,
+            interval: 0,
             createdAt: new Date().toISOString(),
             clozeText: text,
-            clozeNumber: clozeNum
+            clozeNumber: clozeNum,
+            ratingHistory: []
         });
     });
     
@@ -2087,7 +2205,11 @@ function processImport(text) {
                     difficulty: card.difficulty || 'normal',
                     cardType: 'new',
                     confidence: 0,
-                    createdAt: new Date().toISOString()
+                    easeFactor: card.easeFactor || 2.5,
+                    repetitions: card.repetitions || 0,
+                    interval: card.interval || 0,
+                    createdAt: new Date().toISOString(),
+                    ratingHistory: card.ratingHistory || []
                 }));
                 
                 const presetToSave = {
@@ -2176,7 +2298,11 @@ function addDefaultFlashcards() {
         difficulty: 'normal',
         cardType: 'new',
         confidence: 0,
-        createdAt: new Date().toISOString()
+        easeFactor: 2.5,
+        repetitions: 0,
+        interval: 0,
+        createdAt: new Date().toISOString(),
+        ratingHistory: []
     }];
     loadCard(document.querySelector(".main"), 0);
     loadAllTags();
@@ -2188,7 +2314,92 @@ document.addEventListener("DOMContentLoaded", () => {
     loadProgress();
     init();
 });
+// Function to show again-rated cards
+// Function to show again-rated cards
+function showAgainCards() {
+    const againCards = getAgainCards();
+    const againCardsList = document.getElementById("againCardsList");
+    
+    if (againCards.length === 0) {
+        againCardsList.innerHTML = "<p>No cards have been rated as 'Again' yet.</p>";
+    } else {
+        againCardsList.innerHTML = againCards.map(card => `
+            <div class="again-card-item" style="padding: 15px; margin-bottom: 10px; background: var(--bg-secondary); border-radius: 8px;">
+                <div style="font-weight: bold; margin-bottom: 5px;">${card.question}</div>
+                <div style="margin-bottom: 10px;">${card.answer}</div>
+                <div style="font-size: 12px; color: var(--text-dim);">
+                    Tags: ${card.tags?.join(', ') || 'None'} | 
+                    Ease Factor: ${card.easeFactor?.toFixed(2) || 'N/A'} | 
+                    Repetitions: ${card.repetitions || 0} | 
+                    Last Reviewed: ${formatDate(card.lastReviewed)} | 
+                    Next Review: ${formatDate(card.nextReview)}
+                </div>
+                ${card.ratingHistory && card.ratingHistory.length > 0 ? 
+                    `<div style="font-size: 11px; margin-top: 5px;">
+                        Rating History: ${card.ratingHistory.map(r => r.rating).join(', ')}
+                    </div>` : ''
+                }
+            </div>
+        `).join('');
+    }
+    
+    document.getElementById("againCardsModal").style.display = "block";
+}
 
+// Function to close the again cards modal
+function closeAgainCardsModal() {
+    document.getElementById("againCardsModal").style.display = "none";
+}
+
+// Helper function to get all again-rated cards
+// Helper function to get all again-rated cards
+function getAgainCards() {
+    return flashcards.filter(card => {
+        // Check if card has been rated as "Again" (rating 1) in its history
+        if (card.ratingHistory && card.ratingHistory.length > 0) {
+            const lastRating = card.ratingHistory[card.ratingHistory.length - 1].rating;
+            return lastRating === 1;
+        }
+        
+        // For backward compatibility, check ease factor for older cards
+        return card.easeFactor < 1.8;
+    });
+}
+
+// Helper function to format dates
+function formatDate(dateString) {
+    if (!dateString) return "Not scheduled";
+    
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+}
+// Function to migrate existing cards to new format
+function migrateCards() {
+    let needsMigration = false;
+    
+    flashcards.forEach(card => {
+        if (card.easeFactor === undefined) {
+            card.easeFactor = 2.5;
+            needsMigration = true;
+        }
+        if (card.repetitions === undefined) {
+            card.repetitions = 0;
+            needsMigration = true;
+        }
+        if (card.interval === undefined) {
+            card.interval = 0;
+            needsMigration = true;
+        }
+        if (card.ratingHistory === undefined) {
+            card.ratingHistory = [];
+            needsMigration = true;
+        }
+    });
+    
+    if (needsMigration) {
+        saveProgress();
+    }
+}
 // Auto-save progress every 30 seconds
 setInterval(saveProgress, 30000);
 
