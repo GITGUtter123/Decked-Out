@@ -712,6 +712,80 @@ input::placeholder, textarea::placeholder {
   25% { transform: translateX(-5px); }
   75% { transform: translateX(5px); }
 }
+/* Session Timer Styles */
+.session-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin: 20px 0;
+}
+
+.session-option {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: var(--card-radius);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.session-option:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow);
+}
+
+.session-option i {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    color: var(--primary);
+}
+
+.session-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 15px;
+    background: var(--bg-secondary);
+    border-radius: var(--card-radius);
+}
+
+#sessionTimer {
+    font-size: 1.8rem;
+    font-weight: bold;
+    color: var(--primary);
+}
+/* Quizlet Import Styles */
+.import-options {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+}
+
+.import-option {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: var(--card-radius);
+}
+
+.import-option textarea, .import-option input {
+    width: 100%;
+    margin: 10px 0;
+}
+
+#importPreviewList {
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 15px 0;
+}
+
+.preview-card {
+    padding: 10px;
+    margin-bottom: 10px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    border-left: 4px solid var(--primary);
+}
     </style>
 </head>
 <body>
@@ -742,6 +816,12 @@ input::placeholder, textarea::placeholder {
                 Menu ▼
             </button>
             <div id="presetDropdown" class="preset-dropdown-content">
+                <button class="export-csv-btn" onclick="exportToCSV()">
+    <i class="fas fa-file-csv"></i> Export to CSV
+</button>
+<button class="export-anki-btn" onclick="exportToAnki()">
+    <i class="fas fa-download"></i> Export for Anki
+</button>
                 <button onclick="showStatsModal()">
                     <i class="fas fa-chart-bar"></i> Statistics
                 </button>
@@ -759,6 +839,9 @@ input::placeholder, textarea::placeholder {
                 </button>
                 <button class="edit-preset-btn" onclick="showEditModal()">
                     <i class="fas fa-edit"></i> Edit Current Deck
+                </button>
+                <button onclick="showSessionTimerModal()">
+                    <i class="fas fa-hourglass-start"></i> Study Session
                 </button>
                 <ul id="presetList"></ul>
             </div>
@@ -978,6 +1061,60 @@ A2: Jupiter</pre>
         </div>
     </div>
 </div>
+<!-- Session Timer Modal -->
+<div id="sessionTimerModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeSessionTimerModal()">&times;</span>
+        <h2>Study Session Options</h2>
+        <div class="session-options">
+            <div class="session-option" onclick="startTimedSession(10)">
+                <i class="fas fa-bolt"></i>
+                <h3>10-Minute Sprint</h3>
+                <p>Study as many cards as possible in 10 minutes</p>
+            </div>
+            <div class="session-option" onclick="showCardLimitInput()">
+                <i class="fas fa-bullseye"></i>
+                <h3>Card Target</h3>
+                <p>Study until you've reviewed X cards</p>
+            </div>
+        </div>
+        <div id="cardLimitInput" style="display: none; margin-top: 20px;">
+            <input type="number" id="cardLimit" placeholder="Number of cards" min="1" max="100">
+            <button onclick="startCardLimitSession()">Start Session</button>
+        </div>
+        <div id="sessionProgress" style="display: none; margin-top: 20px;">
+            <div class="session-info">
+                <div id="sessionTimer">10:00</div>
+                <div id="sessionCardsCompleted">0 cards reviewed</div>
+            </div>
+            <button onclick="endSession()" style="background-color: var(--danger);">End Session</button>
+        </div>
+    </div>
+</div>
+<!-- Quizlet Import Modal -->
+<div id="quizletImportModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeQuizletImportModal()">&times;</span>
+        <h2>Import from Quizlet</h2>
+        <div class="import-options">
+            <div class="import-option">
+                <h3>Option 1: Paste Quizlet Export</h3>
+                <textarea id="quizletExportText" placeholder="Paste Quizlet export text here..." rows="6"></textarea>
+                <button onclick="processQuizletExport()">Process Export</button>
+            </div>
+            <div class="import-option">
+                <h3>Option 2: Enter Quizlet URL</h3>
+                <input type="text" id="quizletUrl" placeholder="https://quizlet.com/...">
+                <button onclick="fetchQuizletData()">Fetch from URL</button>
+            </div>
+        </div>
+        <div id="quizletPreview" style="display: none; margin-top: 20px;">
+            <h3>Preview</h3>
+            <div id="quizletPreviewList"></div>
+            <button onclick="importQuizletCards()">Import Flashcards</button>
+        </div>
+    </div>
+</div>
 
     <script>
 // Enhanced Flashcard App with Anki-like Features
@@ -997,6 +1134,12 @@ let dailyStats = JSON.parse(localStorage.getItem("dailyStats")) || {};
 let allTags = new Set();
 
 const carousel = document.querySelector(".carousel");
+let sessionActive = false;
+let sessionTimer = null;
+let sessionType = null;
+let sessionEndTime = null;
+let sessionCardLimit = 0;
+let cardsReviewedInSession = 0;
 
 // Spaced Repetition Algorithm (SM-2)
 class SpacedRepetition {
@@ -1068,7 +1211,7 @@ class SpacedRepetition {
 
 // Initialize the app
 function init() {
-    migrateCards();
+    migrateCards();  
     loadSettings();
     updatePresetList();
     updateStudyStats();
@@ -1288,7 +1431,12 @@ function rateCard(rating) {
     const confidenceBtn = document.querySelector(`.confidence-btn:nth-child(${rating})`);
     confidenceBtn.classList.add("pulse");
     setTimeout(() => confidenceBtn.classList.remove("pulse"), 300);
-    
+        // Record this rating
+    card.ratingHistory.push({
+        rating: rating,
+        date: new Date().toISOString()
+    });
+    if (sessionActive) trackCardReview();
     // Save progress
     saveProgress();
     
@@ -2399,6 +2547,180 @@ function migrateCards() {
     if (needsMigration) {
         saveProgress();
     }
+}
+// Session Timer Functions
+function showSessionTimerModal() {
+    document.getElementById("sessionTimerModal").style.display = "block";
+}
+
+function closeSessionTimerModal() {
+    document.getElementById("sessionTimerModal").style.display = "none";
+}
+
+function startTimedSession(minutes) {
+    sessionActive = true;
+    sessionType = 'timed';
+    sessionEndTime = new Date(Date.now() + minutes * 60000);
+    cardsReviewedInSession = 0;
+    
+    document.querySelector('.session-options').style.display = 'none';
+    document.getElementById('sessionProgress').style.display = 'block';
+    
+    updateSessionTimer();
+    sessionTimer = setInterval(updateSessionTimer, 1000);
+    
+    // Add to menu dropdown
+    addToMenuDropdown();
+}
+
+function showCardLimitInput() {
+    document.getElementById('cardLimitInput').style.display = 'block';
+}
+
+function startCardLimitSession() {
+    const limit = parseInt(document.getElementById('cardLimit').value);
+    if (isNaN(limit) || limit < 1) {
+        alert('Please enter a valid number of cards');
+        return;
+    }
+    
+    sessionActive = true;
+    sessionType = 'cardLimit';
+    sessionCardLimit = limit;
+    cardsReviewedInSession = 0;
+    
+    document.querySelector('.session-options').style.display = 'none';
+    document.getElementById('cardLimitInput').style.display = 'none';
+    document.getElementById('sessionProgress').style.display = 'block';
+    
+    document.getElementById('sessionTimer').textContent = `${cardsReviewedInSession}/${sessionCardLimit} cards`;
+    
+    // Add to menu dropdown
+    addToMenuDropdown();
+}
+
+function updateSessionTimer() {
+    if (sessionType === 'timed') {
+        const now = new Date();
+        const timeLeft = sessionEndTime - now;
+        
+        if (timeLeft <= 0) {
+            endSession();
+            return;
+        }
+        
+        const minutes = Math.floor(timeLeft / 60000);
+        const seconds = Math.floor((timeLeft % 60000) / 1000);
+        
+        document.getElementById('sessionTimer').textContent = 
+            `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    } else if (sessionType === 'cardLimit') {
+        document.getElementById('sessionTimer').textContent = 
+            `${cardsReviewedInSession}/${sessionCardLimit} cards`;
+    }
+    
+    document.getElementById('sessionCardsCompleted').textContent = 
+        `${cardsReviewedInSession} cards reviewed`;
+}
+
+function trackCardReview() {
+    if (sessionActive) {
+        cardsReviewedInSession++;
+        
+        if (sessionType === 'cardLimit' && cardsReviewedInSession >= sessionCardLimit) {
+            endSession();
+            alert('Congratulations! You completed your card target!');
+        } else {
+            updateSessionTimer();
+        }
+    }
+}
+
+function endSession() {
+    sessionActive = false;
+    clearInterval(sessionTimer);
+    
+    document.getElementById("sessionTimerModal").style.display = "none";
+    document.querySelector('.session-options').style.display = 'grid';
+    document.getElementById('sessionProgress').style.display = 'none';
+    document.getElementById('cardLimitInput').style.display = 'none';
+    
+    // Show session summary
+    alert(`Session completed!\nYou reviewed ${cardsReviewedInSession} cards in this session.`);
+    
+    // Remove from menu dropdown
+    removeFromMenuDropdown();
+}
+
+function addToMenuDropdown() {
+    const menuItem = document.createElement('button');
+    menuItem.id = 'sessionStatusMenuItem';
+    menuItem.innerHTML = `<i class="fas fa-hourglass-half"></i> Session: ${sessionType === 'timed' ? document.getElementById('sessionTimer').textContent : `${cardsReviewedInSession}/${sessionCardLimit} cards`}`;
+    menuItem.onclick = showSessionTimerModal;
+    
+    const dropdown = document.getElementById('presetDropdown');
+    dropdown.insertBefore(menuItem, dropdown.firstChild);
+}
+
+function removeFromMenuDropdown() {
+    const menuItem = document.getElementById('sessionStatusMenuItem');
+    if (menuItem) {
+        menuItem.remove();
+    }
+}
+// Export Functions
+function exportToCSV() {
+    if (flashcards.length === 0) {
+        alert("No flashcards to export!");
+        return;
+    }
+    
+    let csvContent = "Question,Answer,Tags,Difficulty\n";
+    
+    flashcards.forEach(card => {
+        const question = `"${card.question.replace(/"/g, '""')}"`;
+        const answer = `"${card.answer.replace(/"/g, '""')}"`;
+        const tags = `"${(card.tags || []).join(',')}"`;
+        const difficulty = `"${card.difficulty || 'normal'}"`;
+        
+        csvContent += `${question},${answer},${tags},${difficulty}\n`;
+    });
+    
+    downloadFile(csvContent, 'flashcards.csv', 'text/csv');
+}
+
+function exportToAnki() {
+    if (flashcards.length === 0) {
+        alert("No flashcards to export!");
+        return;
+    }
+    
+    // Create a text file compatible with Anki's import format
+    let ankiContent = "";
+    
+    flashcards.forEach(card => {
+        const question = card.question.replace(/\t/g, ' ').replace(/\n/g, '<br>');
+        const answer = card.answer.replace(/\t/g, ' ').replace(/\n/g, '<br>');
+        const tags = (card.tags || []).join(' ');
+        
+        ankiContent += `${question}\t${answer}\t${tags}\n`;
+    });
+    
+    downloadFile(ankiContent, 'anki_import.txt', 'text/plain');
+}
+
+function downloadFile(content, fileName, contentType) {
+    const blob = new Blob([content], { type: contentType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 0);
 }
 // Auto-save progress every 30 seconds
 setInterval(saveProgress, 30000);
