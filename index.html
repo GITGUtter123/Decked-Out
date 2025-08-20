@@ -882,6 +882,9 @@ input::placeholder, textarea::placeholder {
     margin-bottom: 8px;
     color: var(--primary);
 }
+.mc-options { margin-top: 8px; padding-left: 18px; }
+.mc-options li { margin: 2px 0; }
+
     </style>
 </head>
 <body>
@@ -1312,6 +1315,7 @@ let sessionType = null;
 let sessionEndTime = null;
 let sessionCardLimit = 0;
 let cardsReviewedInSession = 0;
+let ratingInProgress = false;
 
 // Spaced Repetition Algorithm (SM-2)
 class SpacedRepetition {
@@ -1403,14 +1407,8 @@ function init() {
 }
 
 function setupEventListeners() {
-    // Add this to your setupEventListeners function
-document.addEventListener('keydown', function(e) {
-    if (e.key === ' ' && e.target === document.body) {
-        e.preventDefault();
-    }
-});       
     // Keyboard navigation
-document.addEventListener("keydown", handleKeyNavigation);
+    document.addEventListener('keydown', handleKeyNavigation, { capture: true });
     // Flip card on click
     document.addEventListener("click", (e) => {
         if (e.target.closest(".main")) {
@@ -1436,58 +1434,6 @@ document.addEventListener("keydown", handleKeyNavigation);
     tagsInput.addEventListener("blur", () => {
         setTimeout(() => hideTagSuggestions(), 200);
     });
-
-    // Keyboard navigation
-    document.addEventListener("keydown", handleKeyNavigation);
-}
-
-function handleKeyNavigation(e) {
-        if (e.key === " " || (e.key >= "1" && e.key <= "4")) {
-        e.preventDefault();
-    }
-    
-    if (e.key === " ") {
-        // Space to flip card
-        const mainCard = document.querySelector(".main");
-        if (mainCard) mainCard.classList.toggle("flipped");
-        e.preventDefault(); // Add this line to prevent scrolling
-        return false; // Add this line to prevent scrolling
-    } else if (e.key >= "1" && e.key <= "4") {
-        // Number keys 1-4 for rating
-        const rating = parseInt(e.key);
-        if (!document.querySelector(".main").classList.contains("flipped")) {
-            // If card isn't flipped, flip it first
-            document.querySelector(".main").classList.add("flipped");
-            // Wait for flip animation before rating
-            setTimeout(() => rateCard(rating), 300);
-        } else {
-            // If already flipped, rate immediately
-            rateCard(rating);
-        }
-        e.preventDefault(); // Add this line to prevent scrolling
-        return false; // Add this line to prevent scrolling
-    } else if (e.key === "ArrowRight") {
-        nextCard();
-    } else if (e.key === "ArrowLeft") {
-        prevCard();
-    }
-    if (e.key === " " || (e.key >= "1" && e.key <= "4")) {
-        e.preventDefault();
-    }
-    if (e.key === "ArrowRight") {
-        nextCard();
-    } else if (e.key === "ArrowLeft") {
-        prevCard();
-    } else if (e.key === " ") {
-        const mainCard = document.querySelector(".main");
-        if (mainCard) mainCard.classList.toggle("flipped");
-    } else if (e.key >= "1" && e.key <= "4") {
-        const rating = parseInt(e.key);
-        if (!document.querySelector(".main").classList.contains("flipped")) {
-            document.querySelector(".main").classList.add("flipped");
-        }
-        setTimeout(() => rateCard(rating), 300);
-    }
 }
 
 // Study Mode Management
@@ -1535,33 +1481,49 @@ function filterDueCards() {
     flashcards = dueCards;
     currentCardIndex = 0;
 }
+function isTypingContext(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName ? target.tagName.toLowerCase() : '';
+  // Typing if we're in inputs, textareas, selects, deck form, or any open modal
+  return (
+    tag === 'input' ||
+    tag === 'textarea' ||
+    tag === 'select' ||
+    !!target.closest('#flashcard-form') ||
+    !!Array.from(document.querySelectorAll('.modal')).some(m => m.style.display === 'block')
+  );
+}
+
 function handleKeyNavigation(e) {
-    // Prevent default behavior for specific keys
-    if (e.key === " " || (e.key >= "1" && e.key <= "4")) {
-        e.preventDefault();
+  // If cursor is in a typing context, let the keystrokes through
+  if (isTypingContext(e.target)) return;
+
+  // Space = flip current card
+  if (e.key === ' ') {
+    e.preventDefault();
+    const mainCard = document.querySelector('.main');
+    if (mainCard) mainCard.classList.toggle('flipped');
+    return;
+  }
+
+  // 1–4 = rate (flip first if needed so the user sees the answer)
+  if (e.key >= '1' && e.key <= '4') {
+    e.preventDefault();
+    const rating = parseInt(e.key, 10);
+    const main = document.querySelector('.main');
+    if (main && !main.classList.contains('flipped')) {
+      main.classList.add('flipped');
+      setTimeout(() => rateCard(rating), 300);
+    } else {
+      rateCard(rating);
     }
-    
-    if (e.key === " ") {
-        // Space to flip card
-        const mainCard = document.querySelector(".main");
-        if (mainCard) mainCard.classList.toggle("flipped");
-    } else if (e.key >= "1" && e.key <= "4") {
-        // Number keys 1-4 for rating
-        const rating = parseInt(e.key);
-        if (!document.querySelector(".main").classList.contains("flipped")) {
-            // If card isn't flipped, flip it first
-            document.querySelector(".main").classList.add("flipped");
-            // Wait for flip animation before rating
-            setTimeout(() => rateCard(rating), 300);
-        } else {
-            // If already flipped, rate immediately
-            rateCard(rating);
-        }
-    } else if (e.key === "ArrowRight") {
-        nextCard();
-    } else if (e.key === "ArrowLeft") {
-        prevCard();
-    }
+    return;
+  }
+
+  // Arrows = navigate
+  if (e.key === 'ArrowRight') { e.preventDefault(); nextCard(); return; }
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); prevCard(); return; }
 }
 // Card Type Management
 function setCardType(type) {
@@ -1588,21 +1550,18 @@ function rateCard(rating) {
         card.ratingHistory = [];
     }
     
-    // Record this rating
-    card.ratingHistory.push({
-        rating: rating,
-        date: new Date().toISOString()
-    });
-    
     SpacedRepetition.calculateNextReview(card, rating);
     
     // Update daily stats
     updateDailyStats(rating);
     
     // Visual feedback
-    const confidenceBtn = document.querySelector(`.confidence-btn:nth-child(${rating})`);
-    confidenceBtn.classList.add("pulse");
-    setTimeout(() => confidenceBtn.classList.remove("pulse"), 300);
+const btns = document.querySelectorAll('#confidenceButtons .confidence-btn');
+const confidenceBtn = btns[rating - 1];
+if (confidenceBtn) {
+    confidenceBtn.classList.add('pulse');
+    setTimeout(() => confidenceBtn.classList.remove('pulse'), 300);
+}
         // Record this rating
     card.ratingHistory.push({
         rating: rating,
@@ -1637,9 +1596,7 @@ function rateCard(rating) {
         updateStudyStats();
     }, 300);
     
-    setTimeout(() => {
-        this.ratingInProgress = false;
-    }, 500);
+    setTimeout(() => { this.ratingInProgress = false; }, 500);
 }
 
 function showSessionComplete() {
@@ -1673,22 +1630,21 @@ function updateIntervalPredictions() {
 }
 
 function calculateIntervalPredictions(card) {
-    const testCard = JSON.parse(JSON.stringify(card));
-    const predictions = {};
-    
-    for (let rating = 1; rating <= 4; rating++) {
-        const result = SpacedRepetition.calculateNextReview(testCard, rating);
-        const now = new Date();
-        const next = new Date(result.nextReview);
-        const diffMs = next - now;
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
-        
-        const labels = ['again', 'hard', 'good', 'easy'];
-        predictions[labels[rating - 1]] = SpacedRepetition.getIntervalText(diffDays);
-    }
-    
-    return predictions;
+  const predictions = {};
+  const labels = ['again', 'hard', 'good', 'easy'];
+
+  for (let rating = 1; rating <= 4; rating++) {
+    const testCard = JSON.parse(JSON.stringify(card)); // fresh clone each iteration
+    const result = SpacedRepetition.calculateNextReview(testCard, rating);
+    const now = new Date();
+    const next = new Date(result.nextReview);
+    const diffDays = (next - now) / (1000 * 60 * 60 * 24);
+    predictions[labels[rating - 1]] = SpacedRepetition.getIntervalText(diffDays);
+  }
+
+  return predictions;
 }
+
 
 // Enhanced Statistics
 function updateStudyStats() {
@@ -2018,14 +1974,43 @@ function loadCard(element, index) {
             front.innerHTML = "";
             back.innerHTML = "";
             
-            // Add question/answer text
-            const frontText = document.createElement("div");
-            frontText.textContent = card.question || "No question available";
-            front.appendChild(frontText);
-            
-            const backText = document.createElement("div");
-            backText.textContent = card.answer || "No answer available";
-            back.appendChild(backText);
+// Add question text
+const frontText = document.createElement('div');
+frontText.textContent = card.question || 'No question available';
+front.appendChild(frontText);
+
+// If MC options exist, render them
+if (Array.isArray(card.options) && card.options.length) {
+  const list = document.createElement('ul');
+  list.className = 'mc-options';
+  card.options.forEach(o => {
+    const li = document.createElement('li');
+    li.textContent = `${o.label}) ${o.text}`;
+    list.appendChild(li);
+  });
+  front.appendChild(list);
+}
+
+// Back: show answer and (if MC) the list with correct highlighted
+const backText = document.createElement('div');
+backText.textContent = card.answer || 'No answer available';
+back.appendChild(backText);
+
+if (Array.isArray(card.options) && card.options.length) {
+  const list = document.createElement('ul');
+  list.className = 'mc-options';
+  card.options.forEach(o => {
+    const li = document.createElement('li');
+    li.textContent = `${o.label}) ${o.text}`;
+    if (card.correctOption &&
+        o.label.toLowerCase() === String(card.correctOption).toLowerCase()) {
+      li.style.fontWeight = 'bold';
+      li.style.textDecoration = 'underline';
+    }
+    list.appendChild(li);
+  });
+  back.appendChild(list);
+}
             
             // Add image if exists
             if (card.image) {
@@ -2610,52 +2595,82 @@ function closeBulkImportModal() {
 }
 
 function processBulkImport() {
-    const textInput = document.getElementById("bulkTextInput").value.trim();
-    if (!textInput) {
-        alert("Please enter some text to import!");
-        return;
+  const raw = document.getElementById('bulkTextInput').value;
+  const lines = raw.split(/\r?\n/);
+
+  const newFlashcards = [];
+  let q = null;
+  let options = [];
+  let answerText = '';
+  let answerLabel = null;
+
+  const flush = () => {
+    if (!q) return;
+    // Resolve final answer
+    let finalAnswer = answerText;
+    if (!finalAnswer && answerLabel) {
+      const match = options.find(o => o.label.toLowerCase() === answerLabel.toLowerCase());
+      if (match) finalAnswer = `${match.label}) ${match.text}`;
     }
+    newFlashcards.push({
+      question: q,                 // keep question text only (options are separate)
+      answer: finalAnswer || '',
+      options,                     // [{label:'a', text:'...'}, …]
+      correctOption: answerLabel || null,
+      tags: [],
+      difficulty: 'normal',
+      cardType: 'new',
+      confidence: 0,
+      easeFactor: 2.5,
+      repetitions: 0,
+      interval: 0,
+      createdAt: new Date().toISOString(),
+      ratingHistory: []
+    });
+    q = null; options = []; answerText = ''; answerLabel = null;
+  };
 
-    const lines = textInput.split("\n");
-    const newFlashcards = [];
-    let currentQuestion = "";
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
 
-    for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (!trimmedLine) continue;
+    const qMatch = /^Q\d*:?\s*(.+)$/i.exec(line);
+    if (qMatch) { flush(); q = qMatch[1]; continue; }
 
-        if (trimmedLine.match(/^Q\d*:/i)) {
-            currentQuestion = trimmedLine.substring(trimmedLine.indexOf(":") + 1).trim();
-        } else if (trimmedLine.match(/^A\d*:/i) && currentQuestion) {
-            const answer = trimmedLine.substring(trimmedLine.indexOf(":") + 1).trim();
-            newFlashcards.push({
-                question: currentQuestion,
-                answer: answer,
-                tags: [],
-                difficulty: 'normal',
-                cardType: 'new',
-                confidence: 0,
-                createdAt: new Date().toISOString()
-            });
-            currentQuestion = "";
-        }
+    if (q) {
+      const optMatch = /^([a-d])[\)\.\:]\s*(.+)$/i.exec(line);
+      if (optMatch) { options.push({ label: optMatch[1].toLowerCase(), text: optMatch[2] }); continue; }
+
+      const aMatch = /^A\d*:?\s*(.+)$/i.exec(line);
+      if (aMatch) {
+        const txt = aMatch[1];
+        const labelMatch = /^([a-d])[\)\.\:]/i.exec(txt);
+        if (labelMatch) answerLabel = labelMatch[1].toLowerCase();
+        answerText = txt;
+        flush();
+        continue;
+      }
     }
+  }
+  // flush trailing question without A:
+  flush();
 
-    if (newFlashcards.length === 0) {
-        alert("No valid flashcards found. Use Q: and A: format.");
-        return;
-    }
+  if (newFlashcards.length === 0) {
+    alert('No cards found. Use Q1:/A1: and options like "a) foo"');
+    return;
+  }
 
-    flashcards = [...flashcards, ...newFlashcards];
-    shuffleFlashcards();
-    resetCarousel();
-    updateFlashcardCounter();
-    updateStudyStats();
-    loadAllTags();
-    saveProgress();
-    closeBulkImportModal();
-    alert(`Imported ${newFlashcards.length} new flashcards!`);
+  flashcards = [...flashcards, ...newFlashcards];
+  shuffleFlashcards();
+  resetCarousel();
+  updateFlashcardCounter();
+  updateStudyStats();
+  loadAllTags();
+  saveProgress();
+  closeBulkImportModal();
+  alert(`Imported ${newFlashcards.length} new flashcards!`);
 }
+
 
 function addDefaultFlashcards() {
     flashcards = [{
