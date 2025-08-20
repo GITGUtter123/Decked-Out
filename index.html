@@ -827,6 +827,61 @@ input::placeholder, textarea::placeholder {
     background: var(--bg-card);
     color: var(--text-light);
 }
+/* Image Upload Styles */
+.image-upload-container {
+    margin: 15px 0;
+    position: relative;
+}
+
+.image-preview {
+    width: 100%;
+    max-height: 200px;
+    margin: 10px 0;
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+}
+
+.image-preview img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+.remove-image {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: var(--danger);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    display: none;
+}
+
+.upload-btn {
+    background: var(--bg-secondary);
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    padding: 20px;
+    text-align: center;
+    border-radius: var(--card-radius);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.upload-btn:hover {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.upload-btn i {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: var(--primary);
+}
     </style>
 </head>
 <body>
@@ -994,6 +1049,21 @@ input::placeholder, textarea::placeholder {
                     <option value="easy">Easy</option>
                     <option value="hard">Hard</option>
                 </select>
+                <!-- Image Upload Section -->
+<div class="image-upload-container">
+    <div class="upload-btn" onclick="document.getElementById('imageUpload').click()">
+        <i class="fas fa-image"></i>
+        <p>Click to add an image (optional)</p>
+    </div>
+    <input type="file" id="imageUpload" accept="image/*" style="display: none;" onchange="handleImageUpload(this)">
+    
+    <div class="image-preview" id="imagePreview">
+        <img id="previewImage" src="" alt="Image preview">
+        <button class="remove-image" onclick="removeImage()">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+</div>
             </div>
             
             <button type="submit" id="addFlashcardButton">
@@ -1724,6 +1794,7 @@ function addFlashcard() {
             cards.push({
                 question, answer, tags, difficulty,
                 cardType: 'new',
+                image: currentImageData,
                 confidence: 0,
                 easeFactor: 2.5, // Add default ease factor
                 repetitions: 0,  // Add default repetitions
@@ -1771,7 +1842,7 @@ function addFlashcard() {
         // Add tags to global set
         tags.forEach(tag => allTags.add(tag));
         
-        // Clear form
+        // Clear form including image
         clearForm();
         
         // Update UI
@@ -1835,6 +1906,7 @@ function clearForm() {
     document.getElementById("clozeText").value = "";
     document.getElementById("tags").value = "";
     document.getElementById("difficulty").value = "normal";
+    removeImage();
 }
 
 // Tag Management
@@ -1941,8 +2013,38 @@ function loadCard(element, index) {
     if (front && back) {
         if (flashcards.length > 0 && index < flashcards.length) {
             const card = flashcards[index];
-            front.textContent = card.question || "No question available";
-            back.textContent = card.answer || "No answer available";
+            
+            // Clear previous content
+            front.innerHTML = "";
+            back.innerHTML = "";
+            
+            // Add question/answer text
+            const frontText = document.createElement("div");
+            frontText.textContent = card.question || "No question available";
+            front.appendChild(frontText);
+            
+            const backText = document.createElement("div");
+            backText.textContent = card.answer || "No answer available";
+            back.appendChild(backText);
+            
+            // Add image if exists
+            if (card.image) {
+                const frontImg = document.createElement("img");
+                frontImg.src = card.image;
+                frontImg.style.maxWidth = "100%";
+                frontImg.style.maxHeight = "120px";
+                frontImg.style.marginTop = "10px";
+                frontImg.style.borderRadius = "4px";
+                front.appendChild(frontImg);
+                
+                const backImg = document.createElement("img");
+                backImg.src = card.image;
+                backImg.style.maxWidth = "100%";
+                backImg.style.maxHeight = "120px";
+                backImg.style.marginTop = "10px";
+                backImg.style.borderRadius = "4px";
+                back.appendChild(backImg);
+            }
             
             // Show tags
             if (tagsContainer && card.tags && card.tags.length > 0) {
@@ -2295,11 +2397,25 @@ function showEditModal() {
     flashcards.forEach((card, index) => {
         const cardElement = document.createElement("div");
         cardElement.className = "deck-editor-item";
+        
+        let imageSection = '';
+        if (card.image) {
+            imageSection = `
+                <div class="image-preview" style="display: block; margin: 10px 0;">
+                    <img src="${card.image}" style="max-width: 100px; max-height: 100px; border-radius: 4px;">
+                    <button type="button" onclick="removeCardImage(${index})" style="background: var(--danger); padding: 4px 8px; margin-left: 10px;">
+                        Remove Image
+                    </button>
+                </div>
+            `;
+        }
+        
         cardElement.innerHTML = `
             <div class="deck-editor-fields">
                 <textarea class="edit-question" placeholder="Question">${card.question}</textarea>
                 <textarea class="edit-answer" placeholder="Answer">${card.answer}</textarea>
             </div>
+            ${imageSection}
             <div class="deck-editor-meta">
                 <input type="text" class="edit-tags" placeholder="Tags" value="${(card.tags || []).join(', ')}">
                 <select class="edit-difficulty">
@@ -2307,6 +2423,7 @@ function showEditModal() {
                     <option value="normal" ${card.difficulty === 'normal' || !card.difficulty ? 'selected' : ''}>Normal</option>
                     <option value="hard" ${card.difficulty === 'hard' ? 'selected' : ''}>Hard</option>
                 </select>
+                <input type="file" class="edit-image" accept="image/*" onchange="updateCardImage(this, ${index})">
                 <button onclick="removeCardFromEditor(${index})">
                     <i class="fas fa-trash"></i>
                 </button>
@@ -2558,6 +2675,29 @@ function addDefaultFlashcards() {
     loadAllTags();
     updateStudyStats();
 }
+let currentImageData = null;
+
+function handleImageUpload(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            currentImageData = e.target.result;
+            document.getElementById('previewImage').src = currentImageData;
+            document.getElementById('imagePreview').style.display = 'block';
+            document.querySelector('.remove-image').style.display = 'block';
+        }
+        
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+function removeImage() {
+    currentImageData = null;
+    document.getElementById('imageUpload').value = '';
+    document.getElementById('imagePreview').style.display = 'none';
+    document.querySelector('.remove-image').style.display = 'none';
+}
 
 // Initialize app on page load
 document.addEventListener("DOMContentLoaded", () => {
@@ -2775,6 +2915,14 @@ function exportToCSV() {
     if (flashcards.length === 0) {
         alert("No flashcards to export!");
         return;
+    }
+    
+    // Check if any cards have images
+    const hasImages = flashcards.some(card => card.image);
+    if (hasImages) {
+        if (!confirm("Some flashcards contain images. Images cannot be exported to CSV format. Continue without images?")) {
+            return;
+        }
     }
     
     let csvContent = "Question,Answer,Tags,Difficulty\n";
@@ -3108,6 +3256,23 @@ function importAnkiCards() {
     alert(`Successfully imported ${window.pendingAnkiImport.length} cards from Anki!`);
     closeAnkiImportModal();
     delete window.pendingAnkiImport;
+}
+function updateCardImage(input, index) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            flashcards[index].image = e.target.result;
+            showEditModal(); // Refresh the editor to show the new image
+        }
+        
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+function removeCardImage(index) {
+    flashcards[index].image = null;
+    showEditModal(); // Refresh the editor
 }
 // Auto-save progress every 30 seconds
 setInterval(saveProgress, 30000);
