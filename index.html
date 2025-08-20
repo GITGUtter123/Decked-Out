@@ -786,6 +786,47 @@ input::placeholder, textarea::placeholder {
     border-radius: 8px;
     border-left: 4px solid var(--primary);
 }
+/* Hardest Cards Styles */
+.btn-hardest-mode {
+    padding: 12px 24px;
+    border-radius: 25px;
+    font-weight: 600;
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 4px 6px rgba(231, 76, 60, 0.3);
+}
+
+.btn-hardest-mode:hover {
+    background-color: #c0392b;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 8px rgba(231, 76, 60, 0.4);
+}
+
+/* Anki Import Styles */
+.import-option {
+    background: var(--bg-secondary);
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.import-option h3 {
+    margin-top: 0;
+    color: var(--primary);
+}
+
+.import-option input[type="file"] {
+    width: 100%;
+    margin: 10px 0;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bg-card);
+    color: var(--text-light);
+}
     </style>
 </head>
 <body>
@@ -842,6 +883,10 @@ input::placeholder, textarea::placeholder {
                 </button>
                 <button onclick="showSessionTimerModal()">
                     <i class="fas fa-hourglass-start"></i> Study Session
+                </button>
+
+                <button onclick="showAnkiImportModal()">
+                    <i class="fas fa-file-import"></i> Import from Anki
                 </button>
                 <ul id="presetList"></ul>
             </div>
@@ -1056,6 +1101,15 @@ A2: Jupiter</pre>
     <div class="modal-content">
         <span class="close" onclick="closeAgainCardsModal()">&times;</span>
         <h2>Cards Rated as "Again"</h2>
+        <!-- Add this after the study mode toggle -->
+<div class="hardest-cards-section" style="margin: 15px 0; text-align: center;">
+    <button class="btn-hardest-mode" onclick="startHardestCardsReview()" style="background-color: #e74c3c;">
+        <i class="fas fa-fire"></i> Review Hardest Cards
+    </button>
+    <p style="font-size: 12px; color: var(--text-dim); margin-top: 5px;">
+        Focus on cards you've struggled with
+    </p>
+</div>
         <div id="againCardsList" style="max-height: 400px; overflow-y: auto;">
             <!-- Cards will be populated here -->
         </div>
@@ -1112,6 +1166,54 @@ A2: Jupiter</pre>
             <h3>Preview</h3>
             <div id="quizletPreviewList"></div>
             <button onclick="importQuizletCards()">Import Flashcards</button>
+        </div>
+    </div>
+</div>
+<!-- Hardest Cards Review Modal -->
+<div id="hardestCardsModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeHardestCardsModal()">&times;</span>
+        <h2>Hardest Cards Review</h2>
+        <div class="session-info">
+            <div id="hardestCardsProgress">0/0 cards reviewed</div>
+            <div id="hardestCardsStats">0% correct</div>
+        </div>
+        <div class="carousel" id="hardestCarousel">
+            <!-- Cards will be loaded here -->
+        </div>
+        <div class="confidence-buttons" id="hardestConfidenceButtons">
+            <!-- Confidence buttons will be loaded here -->
+        </div>
+        <div class="navigation-buttons">
+            <button onclick="endHardestCardsReview()" style="background-color: #e74c3c;">
+                <i class="fas fa-times"></i> End Session
+            </button>
+        </div>
+    </div>
+</div>
+<!-- Anki Import Modal -->
+<div id="ankiImportModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeAnkiImportModal()">&times;</span>
+        <h2>Import from Anki</h2>
+        <p>Upload an Anki .apkg file or paste exported text:</p>
+        
+        <div class="import-option">
+            <h3>Option 1: Upload .apkg file</h3>
+            <input type="file" id="ankiFileUpload" accept=".apkg">
+            <button onclick="processAnkiFile()">Process File</button>
+        </div>
+        
+        <div class="import-option">
+            <h3>Option 2: Paste exported text</h3>
+            <textarea id="ankiExportText" placeholder="Paste your Anki export here..." rows="6"></textarea>
+            <button onclick="processAnkiText()">Process Text</button>
+        </div>
+        
+        <div id="ankiPreview" style="display: none; margin-top: 20px;">
+            <h3>Preview</h3>
+            <div id="ankiPreviewList"></div>
+            <button onclick="importAnkiCards()">Import Flashcards</button>
         </div>
     </div>
 </div>
@@ -2721,6 +2823,291 @@ function downloadFile(content, fileName, contentType) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }, 0);
+}
+// Hardest Cards Review Mode
+function startHardestCardsReview() {
+    const hardestCards = getHardestCards();
+    
+    if (hardestCards.length === 0) {
+        alert("No hardest cards found! Cards need to be rated 'Again' multiple times to appear here.");
+        return;
+    }
+    
+    // Initialize hardest cards session
+    window.hardestCardsSession = {
+        cards: hardestCards,
+        currentIndex: 0,
+        correct: 0,
+        total: 0
+    };
+    
+    // Show modal
+    document.getElementById("hardestCardsModal").style.display = "block";
+    
+    // Load first card
+    loadHardestCard(0);
+    updateHardestCardsProgress();
+}
+
+function closeHardestCardsModal() {
+    document.getElementById("hardestCardsModal").style.display = "none";
+    delete window.hardestCardsSession;
+}
+
+function getHardestCards() {
+    // Get cards rated "Again" at least twice or with low ease factor
+    return flashcards.filter(card => {
+        const againCount = card.ratingHistory ? 
+            card.ratingHistory.filter(r => r.rating === 1).length : 0;
+        
+        return againCount >= 2 || (card.easeFactor && card.easeFactor < 1.5);
+    });
+}
+
+function loadHardestCard(index) {
+    const session = window.hardestCardsSession;
+    if (!session || index >= session.cards.length) return;
+    
+    session.currentIndex = index;
+    const card = session.cards[index];
+    
+    const carousel = document.getElementById("hardestCarousel");
+    carousel.innerHTML = `
+        <div class="flashcard main">
+            <div class="card-metadata">
+                <div class="card-tags">${(card.tags || []).map(t => `<span class="tag">${t}</span>`).join('')}</div>
+                <div class="card-interval">Hardest</div>
+            </div>
+            <div class="card-face front">${card.question}</div>
+            <div class="card-face back">${card.answer}</div>
+        </div>
+    `;
+    
+    // Add flip functionality
+    carousel.querySelector('.flashcard').addEventListener('click', function() {
+        this.classList.toggle('flipped');
+    });
+    
+    // Update confidence buttons with specific intervals for hardest cards
+    const buttonsContainer = document.getElementById("hardestConfidenceButtons");
+    buttonsContainer.innerHTML = `
+        <button class="confidence-btn again" onclick="rateHardestCard(1)">
+            <div><i class="fas fa-times"></i> Again<div class="interval-time">10m</div></div>
+        </button>
+        <button class="confidence-btn hard" onclick="rateHardestCard(2)">
+            <div><i class="fas fa-frown"></i> Hard<div class="interval-time">1h</div></div>
+        </button>
+        <button class="confidence-btn good" onclick="rateHardestCard(3)">
+            <div><i class="fas fa-smile"></i> Good<div class="interval-time">6h</div></div>
+        </button>
+        <button class="confidence-btn easy" onclick="rateHardestCard(4)">
+            <div><i class="fas fa-star"></i> Easy<div class="interval-time">1d</div></div>
+        </button>
+    `;
+}
+
+function rateHardestCard(rating) {
+    const session = window.hardestCardsSession;
+    if (!session) return;
+    
+    const card = session.cards[session.currentIndex];
+    session.total++;
+    
+    // Track correct answers (ratings 3-4 are considered correct)
+    if (rating >= 3) session.correct++;
+    
+    // Apply special intervals for hardest cards (shorter intervals)
+    const now = new Date();
+    let nextReview = new Date(now);
+    
+    switch(rating) {
+        case 1: // Again - 10 minutes
+            nextReview.setMinutes(now.getMinutes() + 10);
+            break;
+        case 2: // Hard - 1 hour
+            nextReview.setHours(now.getHours() + 1);
+            break;
+        case 3: // Good - 6 hours
+            nextReview.setHours(now.getHours() + 6);
+            break;
+        case 4: // Easy - 1 day
+            nextReview.setDate(now.getDate() + 1);
+            break;
+    }
+    
+    // Update the actual card in the main deck
+    const mainCardIndex = flashcards.findIndex(c => 
+        c.question === card.question && c.answer === card.answer
+    );
+    
+    if (mainCardIndex !== -1) {
+        flashcards[mainCardIndex].nextReview = nextReview.toISOString();
+        if (!flashcards[mainCardIndex].ratingHistory) {
+            flashcards[mainCardIndex].ratingHistory = [];
+        }
+        flashcards[mainCardIndex].ratingHistory.push({
+            rating: rating,
+            date: now.toISOString(),
+            fromHardestSession: true
+        });
+        
+        // Adjust ease factor more aggressively for hardest cards
+        if (rating === 1) {
+            flashcards[mainCardIndex].easeFactor = Math.max(1.3, 
+                (flashcards[mainCardIndex].easeFactor || 2.5) * 0.8);
+        }
+    }
+    
+    // Move to next card or end session
+    if (session.currentIndex + 1 < session.cards.length) {
+        loadHardestCard(session.currentIndex + 1);
+    } else {
+        alert(`Hardest cards session completed!\nScore: ${session.correct}/${session.total} (${Math.round(session.correct/session.total*100)}%)`);
+        closeHardestCardsModal();
+    }
+    
+    updateHardestCardsProgress();
+    saveProgress();
+}
+
+function updateHardestCardsProgress() {
+    const session = window.hardestCardsSession;
+    if (!session) return;
+    
+    document.getElementById("hardestCardsProgress").textContent = 
+        `${session.currentIndex + 1}/${session.cards.length} cards reviewed`;
+    
+    if (session.total > 0) {
+        const percentage = Math.round((session.correct / session.total) * 100);
+        document.getElementById("hardestCardsStats").textContent = `${percentage}% correct`;
+    }
+}
+
+function endHardestCardsReview() {
+    const session = window.hardestCardsSession;
+    if (session) {
+        alert(`Session ended. You reviewed ${session.currentIndex + 1} cards with ${session.correct} correct answers.`);
+    }
+    closeHardestCardsModal();
+}
+// Anki Import Functions
+function showAnkiImportModal() {
+    document.getElementById("ankiImportModal").style.display = "block";
+    toggleDropdown();
+}
+
+function closeAnkiImportModal() {
+    document.getElementById("ankiImportModal").style.display = "none";
+}
+
+function processAnkiFile() {
+    const fileInput = document.getElementById("ankiFileUpload");
+    if (!fileInput.files.length) {
+        alert("Please select an Anki .apkg file");
+        return;
+    }
+    
+    alert("APKG file processing would require additional libraries. For now, please use the text export option.");
+    // In a real implementation, you would use a library like https://github.com/eshah/anki-apkg-export
+}
+
+function processAnkiText() {
+    const text = document.getElementById("ankiExportText").value.trim();
+    if (!text) {
+        alert("Please paste Anki export text");
+        return;
+    }
+    
+    try {
+        const cards = parseAnkiText(text);
+        showAnkiPreview(cards);
+    } catch (e) {
+        alert("Error parsing Anki text: " + e.message);
+    }
+}
+
+function parseAnkiText(text) {
+    // Parse tab-separated values (standard Anki export format)
+    const lines = text.split('\n').filter(line => line.trim());
+    const cards = [];
+    
+    for (const line of lines) {
+        // Skip header line if present
+        if (line.toLowerCase().includes('question') && line.toLowerCase().includes('answer')) {
+            continue;
+        }
+        
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+            const question = parts[0].trim();
+            const answer = parts[1].trim();
+            const tags = parts.length > 2 ? parts[2].split(' ').filter(t => t) : [];
+            
+            if (question && answer) {
+                cards.push({
+                    question: question,
+                    answer: answer,
+                    tags: tags,
+                    difficulty: 'normal',
+                    cardType: 'new',
+                    confidence: 0,
+                    easeFactor: 2.5,
+                    repetitions: 0,
+                    interval: 0,
+                    createdAt: new Date().toISOString(),
+                    ratingHistory: [],
+                    source: 'anki_import'
+                });
+            }
+        }
+    }
+    
+    return cards;
+}
+
+function showAnkiPreview(cards) {
+    const previewList = document.getElementById("ankiPreviewList");
+    previewList.innerHTML = "";
+    
+    if (cards.length === 0) {
+        previewList.innerHTML = "<p>No valid flashcards found in the import.</p>";
+        return;
+    }
+    
+    previewList.innerHTML = `<p>Found ${cards.length} cards:</p>`;
+    
+    cards.slice(0, 5).forEach((card, i) => {
+        previewList.innerHTML += `
+            <div class="preview-card">
+                <strong>Q:</strong> ${card.question.substring(0, 100)}${card.question.length > 100 ? '...' : ''}<br>
+                <strong>A:</strong> ${card.answer.substring(0, 100)}${card.answer.length > 100 ? '...' : ''}
+            </div>
+        `;
+    });
+    
+    if (cards.length > 5) {
+        previewList.innerHTML += `<p>...and ${cards.length - 5} more cards</p>`;
+    }
+    
+    window.pendingAnkiImport = cards;
+    document.getElementById("ankiPreview").style.display = "block";
+}
+
+function importAnkiCards() {
+    if (!window.pendingAnkiImport || window.pendingAnkiImport.length === 0) {
+        alert("No cards to import");
+        return;
+    }
+    
+    flashcards = [...flashcards, ...window.pendingAnkiImport];
+    saveProgress();
+    updateStudyStats();
+    updateFlashcardCounter();
+    loadAllTags();
+    
+    alert(`Successfully imported ${window.pendingAnkiImport.length} cards from Anki!`);
+    closeAnkiImportModal();
+    delete window.pendingAnkiImport;
 }
 // Auto-save progress every 30 seconds
 setInterval(saveProgress, 30000);
