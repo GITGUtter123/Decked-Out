@@ -884,6 +884,135 @@ input::placeholder, textarea::placeholder {
 }
 .mc-options { margin-top: 8px; padding-left: 18px; }
 .mc-options li { margin: 2px 0; }
+/* Search and Filter Styles */
+.search-filter-bar {
+    background: var(--bg-card);
+    border-radius: var(--card-radius);
+    padding: 15px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: center;
+}
+
+.search-container {
+    position: relative;
+    flex: 1;
+    min-width: 250px;
+}
+
+.search-container i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-dim);
+}
+
+.search-container input {
+    padding-left: 35px;
+    width: 100%;
+}
+
+.filter-container {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.filter-container select, .filter-container button {
+    min-height: 40px;
+    font-size: 14px;
+}
+
+.filter-container button {
+    white-space: nowrap;
+}
+
+.search-results-info {
+    margin: 10px 0;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-dim);
+}
+/* Deck Manager Styles */
+.deck-manager-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.decks-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.deck-item, .folder-item {
+    padding: 12px 15px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.deck-item:hover, .folder-item:hover {
+    background: var(--primary);
+    transform: translateX(5px);
+}
+
+.folder-item {
+    background: var(--bg-card);
+}
+
+.deck-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.deck-name {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.deck-meta {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.deck-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.deck-actions button {
+    padding: 4px 8px;
+    font-size: 12px;
+    margin: 0;
+}
+
+.folder-contents {
+    margin-left: 20px;
+    border-left: 2px solid var(--bg-secondary);
+    padding-left: 15px;
+    margin-top: 10px;
+}
+
+.collapsible .folder-contents {
+    display: none;
+}
+
+.collapse-toggle {
+    margin-right: 8px;
+    cursor: pointer;
+}
 
     </style>
 </head>
@@ -908,7 +1037,25 @@ input::placeholder, textarea::placeholder {
                 <div class="stat-label">Streak</div>
             </div>
         </div>
-
+        <div class="search-filter-bar">
+            <div class="search-container">
+                <i class="fas fa-search"></i>
+                <input type="text" id="searchInput" placeholder="Search questions or answers...">
+            </div>
+            <div class="filter-container">
+                <select id="tagFilter">
+                    <option value="">All Tags</option>
+                </select>
+                <select id="difficultyFilter">
+                    <option value="">All Difficulties</option>
+                    <option value="easy">Easy</option>
+                    <option value="normal">Normal</option>
+                    <option value="hard">Hard</option>
+                </select>
+                <button onclick="applyFilters()">Apply Filters</button>
+                <button onclick="clearFilters()">Clear</button>
+            </div>
+        </div>
         <!-- Presets Dropdown Menu -->
         <div class="presets-container">
             <button class="dropdown-btn" onclick="toggleDropdown()">
@@ -945,6 +1092,9 @@ input::placeholder, textarea::placeholder {
 
                 <button onclick="showAnkiImportModal()">
                     <i class="fas fa-file-import"></i> Import from Anki
+                </button>
+                <button onclick="showDeckManager()">
+                    <i class="fas fa-layer-group"></i> Deck Manager
                 </button>
                 <ul id="presetList"></ul>
             </div>
@@ -1290,6 +1440,44 @@ A2: Jupiter</pre>
         </div>
     </div>
 </div>
+<!-- Deck Manager Modal -->
+<div id="deckManagerModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeDeckManager()">&times;</span>
+        <h2>Deck Manager</h2>
+        
+        <div class="deck-manager-actions">
+            <button onclick="createNewDeck()">
+                <i class="fas fa-plus"></i> New Deck
+            </button>
+            <button onclick="createNewFolder()">
+                <i class="fas fa-folder-plus"></i> New Folder
+            </button>
+        </div>
+        
+        <div class="decks-container">
+            <div id="decksList" class="decks-list">
+                <!-- Decks will be populated here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Deck/Folder Creation Modal -->
+<div id="createItemModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeCreateItemModal()">&times;</span>
+        <h2 id="createItemTitle">Create New Deck</h2>
+        
+        <form id="createItemForm">
+            <input type="text" id="itemName" placeholder="Name" required>
+            <select id="parentFolder" style="display: none;">
+                <option value="">Root Level</option>
+            </select>
+            <button type="submit">Create</button>
+        </form>
+    </div>
+</div>
 
     <script>
 // Enhanced Flashcard App with Anki-like Features
@@ -1389,12 +1577,13 @@ class SpacedRepetition {
 function init() {
     migrateCards();  
     loadSettings();
-    updatePresetList();
+    initDeckManager();
     updateStudyStats();
     updateFlashcardCounter();
     createGhostCards();
     loadAllTags();
     updateDailyStats();
+    initSearchFilter();
     
     if (flashcards.length === 0) {
         addDefaultFlashcards();
@@ -3288,6 +3477,389 @@ function updateCardImage(input, index) {
 function removeCardImage(index) {
     flashcards[index].image = null;
     showEditModal(); // Refresh the editor
+}
+// Search and Filter Functions
+function initSearchFilter() {
+    populateTagFilter();
+    document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
+    document.getElementById('tagFilter').addEventListener('change', applyFilters);
+    document.getElementById('difficultyFilter').addEventListener('change', applyFilters);
+}
+
+function populateTagFilter() {
+    const tagFilter = document.getElementById('tagFilter');
+    const currentTags = tagFilter.innerHTML;
+    tagFilter.innerHTML = currentTags; // Keep the "All Tags" option
+    
+    allTags.forEach(tag => {
+        if (!currentTags.includes(`value="${tag}"`)) {
+            const option = document.createElement('option');
+            option.value = tag;
+            option.textContent = tag;
+            tagFilter.appendChild(option);
+        }
+    });
+}
+
+function applyFilters() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const selectedTag = document.getElementById('tagFilter').value;
+    const selectedDifficulty = document.getElementById('difficultyFilter').value;
+    
+    // Create a copy of all flashcards for filtering
+    let filteredCards = [...flashcards];
+    
+    // Apply search filter
+    if (searchTerm) {
+        filteredCards = filteredCards.filter(card => 
+            card.question.toLowerCase().includes(searchTerm) || 
+            card.answer.toLowerCase().includes(searchTerm)
+        );
+    }
+    
+    // Apply tag filter
+    if (selectedTag) {
+        filteredCards = filteredCards.filter(card => 
+            card.tags && card.tags.includes(selectedTag)
+        );
+    }
+    
+    // Apply difficulty filter
+    if (selectedDifficulty) {
+        filteredCards = filteredCards.filter(card => 
+            card.difficulty === selectedDifficulty
+        );
+    }
+    
+    // Update the displayed cards
+    displayFilteredCards(filteredCards);
+}
+
+function displayFilteredCards(filteredCards) {
+    // Create a temporary array for display
+    const originalCards = [...flashcards];
+    flashcards = filteredCards;
+    
+    // Update UI
+    currentCardIndex = 0;
+    resetCarousel();
+    updateFlashcardCounter();
+    
+    // Show filter info
+    const resultsInfo = document.createElement('div');
+    resultsInfo.className = 'search-results-info';
+    resultsInfo.innerHTML = `Showing ${filteredCards.length} of ${originalCards.length} cards 
+        <button onclick="clearFilters()" style="margin-left: 10px; padding: 2px 8px; font-size: 12px;">Show All</button>`;
+    
+    // Remove existing info if any
+    const existingInfo = document.querySelector('.search-results-info');
+    if (existingInfo) existingInfo.remove();
+    
+    // Add new info
+    document.querySelector('.app-container').insertBefore(resultsInfo, document.querySelector('.carousel'));
+    
+    // Restore original cards array for future filtering
+    flashcards = originalCards;
+}
+
+function clearFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('tagFilter').value = '';
+    document.getElementById('difficultyFilter').value = '';
+    
+    // Remove results info
+    const resultsInfo = document.querySelector('.search-results-info');
+    if (resultsInfo) resultsInfo.remove();
+    
+    // Reset to show all cards
+    currentCardIndex = 0;
+    resetCarousel();
+    updateFlashcardCounter();
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+// Deck Management System
+let decks = JSON.parse(localStorage.getItem("flashcardDecks")) || [];
+let currentDeckId = null;
+let creatingItemType = null; // 'deck' or 'folder'
+
+function initDeckManager() {
+    // If no decks exist, create a default deck
+    if (decks.length === 0) {
+        const defaultDeck = {
+            id: generateId(),
+            name: "Default Deck",
+            type: "deck",
+            cards: [...flashcards],
+            parentId: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        decks.push(defaultDeck);
+        currentDeckId = defaultDeck.id;
+        saveDecks();
+    } else {
+        // Load the first deck by default
+        currentDeckId = decks[0].id;
+        loadDeck(currentDeckId);
+    }
+}
+
+function showDeckManager() {
+    renderDecksList();
+    document.getElementById("deckManagerModal").style.display = "block";
+}
+
+function closeDeckManager() {
+    document.getElementById("deckManagerModal").style.display = "none";
+}
+
+function renderDecksList(parentId = null) {
+    const decksList = document.getElementById("decksList");
+    decksList.innerHTML = "";
+    
+    const items = decks.filter(item => item.parentId === parentId);
+    
+    if (items.length === 0 && parentId === null) {
+        decksList.innerHTML = `<p style="text-align: center; color: var(--text-dim);">No decks yet. Create your first deck!</p>`;
+        return;
+    }
+    
+    items.forEach(item => {
+        const itemElement = document.createElement("div");
+        itemElement.className = item.type === "folder" ? "folder-item" : "deck-item";
+        
+        if (item.type === "folder") {
+            const childItems = decks.filter(i => i.parentId === item.id);
+            const isCollapsed = item.collapsed || false;
+            
+            itemElement.innerHTML = `
+                <div>
+                    <span class="collapse-toggle" onclick="toggleFolder('${item.id}')">
+                        <i class="fas fa-${isCollapsed ? 'chevron-right' : 'chevron-down'}"></i>
+                    </span>
+                    <i class="fas fa-folder"></i> ${item.name}
+                </div>
+                <div class="deck-actions">
+                    <button onclick="event.stopPropagation(); editItem('${item.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); deleteItem('${item.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            
+            decksList.appendChild(itemElement);
+            
+            // Add folder contents if not collapsed
+            if (!isCollapsed && childItems.length > 0) {
+                const contentsDiv = document.createElement("div");
+                contentsDiv.className = "folder-contents";
+                contentsDiv.id = `folder-${item.id}-contents`;
+                decksList.appendChild(contentsDiv);
+                renderDecksList(item.id, contentsDiv);
+            }
+        } else {
+            // It's a deck
+            const cardCount = item.cards ? item.cards.length : 0;
+            const isCurrent = currentDeckId === item.id;
+            
+            itemElement.innerHTML = `
+                <div class="deck-info">
+                    <div class="deck-name">${item.name} ${isCurrent ? '(Current)' : ''}</div>
+                    <div class="deck-meta">${cardCount} cards</div>
+                </div>
+                <div class="deck-actions">
+                    <button onclick="event.stopPropagation(); loadDeck('${item.id}')">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); editItem('${item.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); deleteItem('${item.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            
+            itemElement.onclick = () => loadDeck(item.id);
+            decksList.appendChild(itemElement);
+        }
+    });
+}
+
+function createNewDeck() {
+    creatingItemType = "deck";
+    document.getElementById("createItemTitle").textContent = "Create New Deck";
+    document.getElementById("itemName").value = "";
+    document.getElementById("parentFolder").style.display = "block";
+    populateParentFolderOptions();
+    document.getElementById("createItemModal").style.display = "block";
+}
+
+function createNewFolder() {
+    creatingItemType = "folder";
+    document.getElementById("createItemTitle").textContent = "Create New Folder";
+    document.getElementById("itemName").value = "";
+    document.getElementById("parentFolder").style.display = "block";
+    populateParentFolderOptions();
+    document.getElementById("createItemModal").style.display = "block";
+}
+
+function populateParentFolderOptions() {
+    const parentSelect = document.getElementById("parentFolder");
+    parentSelect.innerHTML = '<option value="">Root Level</option>';
+    
+    const folders = decks.filter(item => item.type === "folder");
+    folders.forEach(folder => {
+        const option = document.createElement("option");
+        option.value = folder.id;
+        option.textContent = folder.name;
+        parentSelect.appendChild(option);
+    });
+}
+
+function closeCreateItemModal() {
+    document.getElementById("createItemModal").style.display = "none";
+}
+
+document.getElementById("createItemForm").addEventListener("submit", function(e) {
+    e.preventDefault();
+    
+    const name = document.getElementById("itemName").value.trim();
+    const parentId = document.getElementById("parentFolder").value || null;
+    
+    if (!name) return;
+    
+    if (creatingItemType === "deck") {
+        const newDeck = {
+            id: generateId(),
+            name: name,
+            type: "deck",
+            cards: [],
+            parentId: parentId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        decks.push(newDeck);
+    } else {
+        const newFolder = {
+            id: generateId(),
+            name: name,
+            type: "folder",
+            parentId: parentId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            collapsed: false
+        };
+        decks.push(newFolder);
+    }
+    
+    saveDecks();
+    renderDecksList();
+    closeCreateItemModal();
+});
+
+function loadDeck(deckId) {
+    const deck = decks.find(d => d.id === deckId);
+    if (!deck || deck.type !== "deck") return;
+    
+    currentDeckId = deckId;
+    flashcards = deck.cards || [];
+    currentCardIndex = 0;
+    
+    shuffleFlashcards();
+    resetCarousel();
+    updateStudyStats();
+    updateFlashcardCounter();
+    loadAllTags();
+    
+    closeDeckManager();
+}
+
+function editItem(itemId) {
+    const item = decks.find(d => d.id === itemId);
+    if (!item) return;
+    
+    const newName = prompt("Enter new name:", item.name);
+    if (newName && newName.trim()) {
+        item.name = newName.trim();
+        item.updatedAt = new Date().toISOString();
+        saveDecks();
+        renderDecksList();
+    }
+}
+
+function deleteItem(itemId) {
+    const item = decks.find(d => d.id === itemId);
+    if (!item) return;
+    
+    // Check if it's a folder with contents
+    if (item.type === "folder") {
+        const childItems = decks.filter(d => d.parentId === itemId);
+        if (childItems.length > 0) {
+            if (!confirm("This folder contains items. Delete everything inside as well?")) {
+                return;
+            }
+            // Delete all child items
+            decks = decks.filter(d => d.parentId !== itemId);
+        }
+    }
+    
+    if (confirm(`Are you sure you want to delete "${item.name}"?`)) {
+        // Don't delete the current deck if it's the only one
+        if (item.type === "deck" && decks.filter(d => d.type === "deck").length <= 1) {
+            alert("You need to have at least one deck.");
+            return;
+        }
+        
+        decks = decks.filter(d => d.id !== itemId);
+        saveDecks();
+        renderDecksList();
+        
+        // If we deleted the current deck, load the first available deck
+        if (itemId === currentDeckId) {
+            const firstDeck = decks.find(d => d.type === "deck");
+            if (firstDeck) {
+                loadDeck(firstDeck.id);
+            }
+        }
+    }
+}
+
+function toggleFolder(folderId) {
+    const folder = decks.find(d => d.id === folderId && d.type === "folder");
+    if (folder) {
+        folder.collapsed = !folder.collapsed;
+        saveDecks();
+        renderDecksList();
+    }
+}
+
+function saveDecks() {
+    // Also save the current deck's cards
+    const currentDeck = decks.find(d => d.id === currentDeckId);
+    if (currentDeck) {
+        currentDeck.cards = [...flashcards];
+        currentDeck.updatedAt = new Date().toISOString();
+    }
+    
+    localStorage.setItem("flashcardDecks", JSON.stringify(decks));
+}
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 // Auto-save progress every 30 seconds
 setInterval(saveProgress, 30000);
