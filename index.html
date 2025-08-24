@@ -1013,6 +1013,14 @@ input::placeholder, textarea::placeholder {
     margin-right: 8px;
     cursor: pointer;
 }
+.cloze-toolbar { display:flex; align-items:center; gap:.5rem; margin:.5rem 0; flex-wrap:wrap; }
+.cloze-toolbar button { padding:.4rem .6rem; border-radius:.5rem; border:1px solid var(--border, #ddd); cursor:pointer; }
+.cloze-tip { opacity:.8; font-size:.9rem; }
+
+.cloze-preview { margin-top:.5rem; padding:.75rem; border:1px dashed var(--muted, #bbb); border-radius:.5rem; }
+.cloze-gap { padding:0 .25rem; border-bottom:2px solid currentColor; font-weight:600; }
+.cloze-hint { opacity:.7; font-style:italic; margin-left:.25rem; }
+.cloze-error { color:#b00020; margin-top:.35rem; }
 
     </style>
 </head>
@@ -1188,9 +1196,22 @@ input::placeholder, textarea::placeholder {
                 <textarea id="answer" placeholder="Enter answer (press Enter for new line)" required rows="3"></textarea>
             </div>
             
-            <div id="clozeFields" style="display: none;">
-                <textarea id="clozeText" placeholder="Enter text with {{c1::deletions}} like {{c1::this}}" rows="4"></textarea>
+            <div id="clozeFields" style="display:none;">
+            <div class="cloze-toolbar" aria-label="Cloze tools">
+                <button type="button" id="clozeWrapBtn" title="Wrap selection with next cN">Wrap selection</button>
+                <button type="button" id="clozeNextBtn" title="Insert next cN at cursor">Insert {{cN::…}}</button>
+                <span class="cloze-tip">Tip: use the same number (e.g., c1) on multiple blanks to bundle them into one card.</span>
             </div>
+
+            <textarea id="clozeText"
+                        placeholder="Type a sentence and hide bits like {{c1::glucose}} or with a hint {{c2::mitochondria::organelle}}"
+                        rows="5"
+                        aria-label="Cloze text"></textarea>
+
+            <div id="clozePreview" class="cloze-preview" aria-live="polite"></div>
+            <div id="clozeError" class="cloze-error" role="alert" style="display:none;"></div>
+            </div>
+
             
             <div class="form-row">
                 <div class="tags-input">
@@ -1716,14 +1737,35 @@ function handleKeyNavigation(e) {
 }
 // Card Type Management
 function setCardType(type) {
-    currentCardType = type;
-    document.querySelectorAll('.card-type-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelector(`[data-type="${type}"]`).classList.add('active');
-    
-    // Show/hide appropriate fields
-    document.getElementById('basicFields').style.display = type === 'basic' || type === 'reverse' ? 'block' : 'none';
-    document.getElementById('clozeFields').style.display = type === 'cloze' ? 'block' : 'none';
+  currentCardType = type;
+  document.querySelectorAll('.card-type-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector(`[data-type="${type}"]`).classList.add('active');
+
+  // Show/hide fields
+  const basicBlock = document.getElementById('basicFields');
+  const clozeBlock = document.getElementById('clozeFields');
+  basicBlock.style.display = (type === 'basic' || type === 'reverse') ? 'block' : 'none';
+  clozeBlock.style.display = (type === 'cloze') ? 'block' : 'none';
+
+  // Toggle required attrs so hidden inputs don’t block submit
+  const q = document.getElementById('question');
+  const a = document.getElementById('answer');
+  const c = document.getElementById('clozeText');
+  if (q && a && c) {
+    const isCloze = (type === 'cloze');
+    q.required = a.required = !isCloze;
+    c.required = isCloze;
+  }
+
+  if (type === 'cloze') {
+    requestAnimationFrame(() => {
+      const ta = document.getElementById('clozeText');
+      ta && ta.focus();
+      updateClozePreview(); // keep preview in sync
+    });
+  }
 }
+
 
 // Enhanced Card Rating with Spaced Repetition
 // Enhanced Card Rating with Spaced Repetition
@@ -1978,8 +2020,12 @@ function addFlashcard() {
         }
     } else if (currentCardType === 'cloze') {
         const clozeText = document.getElementById("clozeText").value.trim();
+        const err = validateClozeBraces(clozeText);
+        if (err) { alert(err); return; }
         cards = processClozeText(clozeText, tags, difficulty);
+        if (!cards.length) { alert("No valid clozes found. Use {{c1::answer}} syntax."); return; }
     }
+
     
     if (cards.length > 0) {
         flashcards.push(...cards);
@@ -2004,46 +2050,136 @@ function addFlashcard() {
 }
 
 function processClozeText(text, tags, difficulty) {
-    const cards = [];
-    const clozeRegex = /\{\{c(\d+)::(.*?)\}\}/g;
-    const clozes = {};
-    
-    let match;
-    while ((match = clozeRegex.exec(text)) !== null) {
-        const clozeNum = match[1];
-        const clozeContent = match[2];
-        
-        if (!clozes[clozeNum]) clozes[clozeNum] = [];
-        clozes[clozeNum].push({
-            full: match[0],
-            content: clozeContent
-        });
-    }
-    
-    Object.keys(clozes).forEach(clozeNum => {
-        const question = text.replace(
-            new RegExp(`\\{\\{c${clozeNum}::(.*?)\\}\\}`, 'g'),
-            '[...]'
-        ).replace(/\{\{c\d+::(.*?)\}\}/g, '$1');
-        
-        const answer = clozes[clozeNum].map(c => c.content).join(', ');
-        
-        cards.push({
-            question, answer, tags, difficulty,
-            cardType: 'new',
-            confidence: 0,
-            easeFactor: 2.5,
-            repetitions: 0,
-            interval: 0,
-            createdAt: new Date().toISOString(),
-            clozeText: text,
-            clozeNumber: clozeNum,
-            ratingHistory: []
-        });
+  const cards = [];
+  if (!text) return cards;
+
+  // Match {{cN::content}} OR {{cN::content::hint}}
+  const tokenRe = /\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g;
+
+  // Collect by cloze number (Anki-style: same number -> one card with multiple gaps)
+  /** @type {Record<string,{full:string,content:string,hint?:string}[]>} */
+  const clozes = {};
+  let m;
+  while ((m = tokenRe.exec(text)) !== null) {
+    const num = m[1];
+    const content = m[2];
+    const hint = m[3];
+    if (!clozes[num]) clozes[num] = [];
+    clozes[num].push({ full: m[0], content, hint });
+  }
+
+  // Build a card for each cloze number
+  Object.keys(clozes).forEach(num => {
+    const group = clozes[num];
+
+    // Question: hide only the target cN; reveal others
+    const question = text
+      // hide target number with [...]
+      .replace(new RegExp(`\\{\\{c${num}::(.*?)(?:::(.*?))?\\}\\}`, 'g'),
+               (_all, _content, hint) => `[...]${hint ? ` <span class="cloze-hint">(${hint})</span>` : ''}`)
+      // reveal non-target numbers (show their content)
+      .replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, (_all, content, hint) =>
+               `${content}${hint ? ` <span class="cloze-hint">(${hint})</span>` : ''}`);
+
+    // Answer: list of all hidden pieces for this number
+    const answer = group.map(x => x.content).join(', ');
+
+    cards.push({
+      question,
+      answer,
+      tags,
+      difficulty,
+      image: currentImageData || null,
+      cardType: 'new',
+      confidence: 0,
+      easeFactor: 2.5,
+      repetitions: 0,
+      interval: 0,
+      createdAt: new Date().toISOString(),
+      clozeText: text,
+      clozeNumber: Number(num),
+      ratingHistory: []
     });
-    
-    return cards;
+  });
+
+  return cards;
 }
+
+function getNextClozeIndex(text) {
+  const re = /\{\{c(\d+)::/g;
+  let m, max = 0;
+  while ((m = re.exec(text)) !== null) max = Math.max(max, Number(m[1]));
+  return max + 1 || 1;
+}
+
+function wrapSelectionWithCloze() {
+  const ta = document.getElementById('clozeText');
+  if (!ta) return;
+  const { selectionStart:s, selectionEnd:e, value:v } = ta;
+  const sel = v.slice(s, e);
+  const next = getNextClozeIndex(v);
+  const insert = sel
+    ? `{{c${next}::${sel}}}`
+    : `{{c${next}::}}`;
+  const newVal = v.slice(0, s) + insert + v.slice(e);
+  ta.value = newVal;
+  // place caret inside if empty
+  const caretPos = sel ? s + insert.length : s + `{{c${next}::`.length;
+  ta.focus();
+  ta.setSelectionRange(caretPos, caretPos);
+  updateClozePreview();
+}
+
+function insertNextClozeAtCursor() {
+  const ta = document.getElementById('clozeText');
+  if (!ta) return;
+  const { selectionStart:s, selectionEnd:e, value:v } = ta;
+  const next = getNextClozeIndex(v);
+  const insert = `{{c${next}::}}`;
+  const newVal = v.slice(0, s) + insert + v.slice(e);
+  ta.value = newVal;
+  const caretPos = s + insert.length - 2; // put caret before the closing }}
+  ta.focus();
+  ta.setSelectionRange(caretPos, caretPos);
+  updateClozePreview();
+}
+
+function validateClozeBraces(text) {
+  // quick sanity checks
+  const opens = (text.match(/\{\{/g) || []).length;
+  const closes = (text.match(/\}\}/g) || []).length;
+  if (opens !== closes) return "Unbalanced braces: make sure each '{{' has a matching '}}'.";
+
+  // ensure at least one proper token exists
+  if (!/\{\{c\d+::.*?\}\}/.test(text)) return "Add at least one cloze like {{c1::answer}}.";
+  return null;
+}
+
+function renderClozePreview(text) {
+  // convert tokens to a pretty preview; this mirrors processClozeText’s question logic
+  return text
+    .replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g,
+      (_all, _n, content, hint) =>
+        `<span class="cloze-gap">[...]</span>${hint ? ` <span class="cloze-hint">(${hint})</span>` : ''}`);
+}
+
+function updateClozePreview() {
+  const ta = document.getElementById('clozeText');
+  const prev = document.getElementById('clozePreview');
+  const err = document.getElementById('clozeError');
+  if (!ta || !prev || !err) return;
+
+  const msg = validateClozeBraces(ta.value);
+  if (msg) {
+    err.textContent = msg;
+    err.style.display = 'block';
+    prev.innerHTML = '';
+    return;
+  }
+  err.style.display = 'none';
+  prev.innerHTML = renderClozePreview(ta.value);
+}
+
 
 function clearForm() {
     document.getElementById("question").value = "";
@@ -2086,6 +2222,10 @@ function showTagSuggestions() {
     ).join('');
     
     suggestions.style.display = 'block';
+const pv = document.getElementById("clozePreview");
+const er = document.getElementById("clozeError");
+if (pv) pv.innerHTML = "";
+if (er) er.style.display = "none";
 }
 
 function hideTagSuggestions() {
@@ -2905,9 +3045,23 @@ function removeImage() {
 
 // Initialize app on page load
 document.addEventListener("DOMContentLoaded", () => {
-    loadProgress();
-    init();
+  loadProgress();
+  init();
+
+  // Cloze helpers
+  const clozeTA = document.getElementById('clozeText');
+  const wrapBtn = document.getElementById('clozeWrapBtn');
+  const nextBtn = document.getElementById('clozeNextBtn');
+
+  if (clozeTA) {
+    clozeTA.addEventListener('input', updateClozePreview);
+    // initialize preview if user reloads with content
+    updateClozePreview();
+  }
+  if (wrapBtn) wrapBtn.addEventListener('click', wrapSelectionWithCloze);
+  if (nextBtn) nextBtn.addEventListener('click', insertNextClozeAtCursor);
 });
+
 // Function to show again-rated cards
 // Function to show again-rated cards
 function showAgainCards() {
